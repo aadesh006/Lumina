@@ -1,0 +1,16 @@
+# Build directories
+build/
+
+# Executables
+lumina_app
+*.exe
+*.out
+
+# Object files and intermediate build files
+*.o
+*.obj
+*.cu.o
+
+# IDE settings
+.vscode/
+.idea/
