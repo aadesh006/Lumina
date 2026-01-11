@@ -2,8 +2,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// --- THE ERROR CHECKING MACRO ---
-// This acts like a "guard" for every CUDA call.
 #define CHECK_CUDA(call) { \
     cudaError_t err = call; \
     if (err != cudaSuccess) { \
@@ -28,6 +26,14 @@ __global__ void grayscaleKernel(const unsigned char* input, unsigned char* outpu
     }
 }
 
+// THE BLUR KERNEL
+__global__ void blurKernel(const unsigned char* input, unsigned char* output, int width, int height, int blurSize) {
+    
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+}
+
 void runCudaProcess(const unsigned char* h_input, unsigned char* h_output, int width, int height) {
     size_t numPixels = width * height;
     unsigned char *d_input, *d_output;
@@ -47,7 +53,7 @@ void runCudaProcess(const unsigned char* h_input, unsigned char* h_output, int w
     // 3. Launch Kernel
     grayscaleKernel<<<gridSize, blockSize>>>(d_input, d_output, width, height);
 
-    // 4. Check for Kernel Launch Errors (Important!)
+    // 4. Check for Kernel Launch Errors
     CHECK_CUDA(cudaGetLastError());
     
     // 5. Force GPU to finish (Synchronize) to catch execution errors
