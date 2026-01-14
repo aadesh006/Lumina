@@ -16,7 +16,7 @@ Lumina explores:
 - Parallel execution models
 - Performance bottlenecks such as PCIe transfers
 
-This project is intended as a **systems and performance engineering learning artifact**, not a replacement for existing libraries like OpenCV.
+This project is intended as a **systems and performance engineering learning artifact**
 
 ---
 
@@ -43,6 +43,7 @@ You can currently execute:
 ---
 
 ### Repository Structure
+```
 Lumina/
 ├── CMakeLists.txt        # Build configuration
 ├── .gitignore
@@ -53,6 +54,7 @@ Lumina/
 │   ├── main.cpp          # Host-side orchestration
 │   └── kernels.cu        # CUDA device kernels
 └── README.md             # Project documentation
+```
 
 ---
 
