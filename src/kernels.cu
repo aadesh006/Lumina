@@ -32,6 +32,30 @@ __global__ void blurKernel(const unsigned char* input, unsigned char* output, in
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
+    if (x < width && y < height) {
+        
+        int pixVal = 0;
+        int pixelsCounted = 0;
+
+        // 3. The Stencil Loop
+        for (int blurRow = -blurSize; blurRow <= blurSize; ++blurRow) {
+            for (int blurCol = -blurSize; blurCol <= blurSize; ++blurCol) {
+                
+                int curRow = y + blurRow;
+                int curCol = x + blurCol;
+
+                //Boundary Check
+                if (curRow >= 0 && curRow < height && curCol >= 0 && curCol < width) {
+                    // Read global memory
+                    pixVal += input[curRow * width + curCol];
+                    pixelsCounted++;
+                }
+            }
+        }
+
+        //Write Average (Sum / Count)
+        output[y * width + x] = (unsigned char)(pixVal / pixelsCounted);
+    }
 }
 
 void runCudaProcess(const unsigned char* h_input, unsigned char* h_output, int width, int height) {
