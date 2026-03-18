@@ -9,4 +9,6 @@ add_executable(lumina_app
     src/kernels.cu
 )
 
+target_include_directories(lumina_app PRIVATE include)
+
 target_link_libraries(lumina_app PRIVATE cuda)
