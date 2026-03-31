@@ -11,64 +11,79 @@
     } \
 }
 
-//THE BLUR KERNEL (Runs on GPU)
-__global__ void blurKernel(const unsigned char* input, unsigned char* output, int width, int height, int blurSize) {
-    //Get Global Thread ID
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+//define constants so the compiler knows the size of our Shared Memory array
+#define TILE_SIZE 16
+#define RADIUS 3
+#define SHARED_WIDTH (TILE_SIZE + 2 * RADIUS)
 
-    //Boundary Guard: Are we inside the image?
+__global__ void blurKernelShared(const unsigned char* input, unsigned char* output, int width, int height) {
+    
+    __shared__ unsigned char s_tile[SHARED_WIDTH][SHARED_WIDTH];
+
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int x = blockIdx.x * TILE_SIZE + tx;
+    int y = blockIdx.y * TILE_SIZE + ty;
+
+    int num_elements = SHARED_WIDTH * SHARED_WIDTH;
+    int tid = ty * TILE_SIZE + tx; // My local thread ID (0 to 255)
+
+    for (int i = tid; i < num_elements; i += (TILE_SIZE * TILE_SIZE)) {
+        int s_row = i / SHARED_WIDTH;
+        int s_col = i % SHARED_WIDTH;
+        
+        // Map shared coordinate back to global image coordinate
+        int g_row = blockIdx.y * TILE_SIZE - RADIUS + s_row;
+        int g_col = blockIdx.x * TILE_SIZE - RADIUS + s_col;
+
+        // Boundary check for the Global Image
+        if (g_row >= 0 && g_row < height && g_col >= 0 && g_col < width) {
+            s_tile[s_row][s_col] = input[g_row * width + g_col];
+        } else {
+            s_tile[s_row][s_col] = 0;
+        }
+    }
+
+    __syncthreads();
+
     if (x < width && y < height) {
         int pixVal = 0;
         int pixelsCounted = 0;
 
-        //Stencil Loop: Look at neighbors
-        for (int blurRow = -blurSize; blurRow <= blurSize; ++blurRow) {
-            for (int blurCol = -blurSize; blurCol <= blurSize; ++blurCol) {
-                
-                int curRow = y + blurRow;
-                int curCol = x + blurCol;
+        for (int blurRow = -RADIUS; blurRow <= RADIUS; ++blurRow) {
+            for (int blurCol = -RADIUS; blurCol <= RADIUS; ++blurCol) {
 
-                //Inner Boundary Guard: Is the neighbor inside the image?
-                if (curRow >= 0 && curRow < height && curCol >= 0 && curCol < width) {
-                    pixVal += input[curRow * width + curCol];
-                    pixelsCounted++;
-                }
+                int s_y = ty + RADIUS + blurRow;
+                int s_x = tx + RADIUS + blurCol;
+                
+                pixVal += s_tile[s_y][s_x];
+                pixelsCounted++;
             }
         }
 
-        //Write the average value to the output
         output[y * width + x] = (unsigned char)(pixVal / pixelsCounted);
     }
 }
 
-//THE LAUNCHER (Runs on CPU)
 void launchBlurKernel(const unsigned char* h_input, unsigned char* h_output, int width, int height, int blurSize) {
     size_t numPixels = width * height; 
     unsigned char *d_input, *d_output;
 
     CHECK_CUDA(cudaMalloc((void**)&d_input, numPixels));
     CHECK_CUDA(cudaMalloc((void**)&d_output, numPixels));
-
-    // Copy Data to GPU
     CHECK_CUDA(cudaMemcpy(d_input, h_input, numPixels, cudaMemcpyHostToDevice));
 
-    dim3 blockSize(16, 16);
-    dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
+    dim3 blockSize(TILE_SIZE, TILE_SIZE);
+    dim3 gridSize((width + TILE_SIZE - 1) / TILE_SIZE, (height + TILE_SIZE - 1) / TILE_SIZE);
 
-    printf("Launching Blur Kernel (Radius %d) on %dx%d grid...\n", blurSize, gridSize.x, gridSize.y);
+    printf("Launching SHARED MEMORY Blur Kernel (Radius %d)...\n", RADIUS);
 
-    // Launch Kernel
-    blurKernel<<<gridSize, blockSize>>>(d_input, d_output, width, height, blurSize);
+    // Call the new shared memory kernel
+    blurKernelShared<<<gridSize, blockSize>>>(d_input, d_output, width, height);
     
-    // Catch execution errors
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-
-    // Copy Data back to CPU
     CHECK_CUDA(cudaMemcpy(h_output, d_output, numPixels, cudaMemcpyDeviceToHost));
-
-    // Free VRAM
     CHECK_CUDA(cudaFree(d_input));
     CHECK_CUDA(cudaFree(d_output));
 }
