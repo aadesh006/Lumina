@@ -65,6 +65,9 @@ __global__ void blurKernelShared(const unsigned char* input, unsigned char* outp
     }
 }
 
+void launchBlurKernelAsync(const unsigned char* d_input, unsigned char* d_output, int width, int height, int blurSize, cudaStream_t stream) {
+}
+
 void launchBlurKernel(const unsigned char* h_input, unsigned char* h_output, int width, int height, int blurSize) {
     size_t numPixels = width * height; 
     unsigned char *d_input, *d_output;
