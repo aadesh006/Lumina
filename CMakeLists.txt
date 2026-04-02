@@ -12,6 +12,11 @@ add_executable(lumina_app
     src/kernels.cu
 )
 
-#Link the OpenCV headers and binaries
-target_include_directories(lumina_app PRIVATE include ${OpenCV_INCLUDE_DIRS})
+# let C++ compiler can see'include' folder, OpenCV, AND the CUDA Toolkit!
+target_include_directories(lumina_app PRIVATE 
+    include 
+    ${OpenCV_INCLUDE_DIRS} 
+    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+)
+
 target_link_libraries(lumina_app PRIVATE cuda ${OpenCV_LIBS})
