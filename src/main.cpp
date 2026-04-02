@@ -1,5 +1,6 @@
 #include <iostream>
 #include <opencv2/opencv.hpp>
+#include <cuda_runtime.h>
 #include "kernels.cuh"
 
 int main(int argc, char** argv) {
@@ -8,56 +9,73 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    // Open the Input Video
     cv::VideoCapture cap(argv[1]);
-    if (!cap.isOpened()) {
-        std::cerr << "Error: Could not open video file. Check the path!" << std::endl;
-        return -1;
-    }
+    if (!cap.isOpened()) return -1;
 
-    // Get video metadata
     int width = cap.get(cv::CAP_PROP_FRAME_WIDTH);
     int height = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
     double fps = cap.get(cv::CAP_PROP_FPS);
-    int totalFrames = cap.get(cv::CAP_PROP_FRAME_COUNT);
+    size_t numBytes = width * height * sizeof(unsigned char);
 
-    std::cout << "--- Lumina Video Engine ---" << std::endl;
-    std::cout << "Resolution: " << width << "x" << height << " @ " << fps << " FPS" << std::endl;
-    std::cout << "Total Frames: " << totalFrames << std::endl;
-
-    // Create the Output Video Writer
     cv::VideoWriter writer("blurred_output.mp4", cv::VideoWriter::fourcc('m','p','4','v'), fps, cv::Size(width, height), false);
 
-    // Matrix objects to hold our image data in CPU RAM
-    cv::Mat frame, grayFrame;
-    
-    // pre-allocate the output frame to hold the data coming back from the GPU
-    cv::Mat blurredFrame(height, width, CV_8UC1); 
+    std::cout << "--- Lumina Asynchronous Engine ---" << std::endl;
 
+    // 1. PRE-ALLOCATION PHASE
+    // A. Allocate Pinned Memory on the CPU (Page-Locked for fast PCIe transfers)
+    unsigned char *h_pinned_in, *h_pinned_out;
+    cudaMallocHost((void**)&h_pinned_in, numBytes);
+    cudaMallocHost((void**)&h_pinned_out, numBytes);
+
+    // B. Allocate VRAM on the GPU
+    unsigned char *d_in, *d_out;
+    cudaMalloc((void**)&d_in, numBytes);
+    cudaMalloc((void**)&d_out, numBytes);
+
+    // C. Create the CUDA Stream (Our custom assembly line lane)
+    cudaStream_t stream1;
+    cudaStreamCreate(&stream1);
+
+    cv::Mat frame, grayFrame;
+    cv::Mat blurredFrame(height, width, CV_8UC1, h_pinned_out); // Point OpenCV directly to our pinned output memory!
     int frameCount = 0;
 
-    // The Main Processing Loop
+    // 2. THE ASYNC VIDEO LOOP
     while (cap.read(frame)) {
-        // Convert the BGR video frame to Grayscale
         cv::cvtColor(frame, grayFrame, cv::COLOR_BGR2GRAY);
 
-        launchBlurKernel(grayFrame.data, blurredFrame.data, width, height, 3);
+        // 1. CPU copies OpenCV data into the Pinned Memory buffer
+        std::memcpy(h_pinned_in, grayFrame.data, numBytes);
 
-        // processed frame to the new video file
+        // 2. ASYNC Transfer: CPU tells DMA controller to move data, then immediately moves to next line
+        cudaMemcpyAsync(d_in, h_pinned_in, numBytes, cudaMemcpyHostToDevice, stream1);
+
+        // 3. ASYNC Compute: Fire the kernel into the stream
+        launchBlurKernelAsync(d_in, d_out, width, height, 3, stream1);
+
+        // 4. ASYNC Transfer: Send data back to Pinned Memory
+        cudaMemcpyAsync(h_pinned_out, d_out, numBytes, cudaMemcpyDeviceToHost, stream1);
+
+        // 5. Sync Point: Wait for THIS specific frame to finish its round trip
+        cudaStreamSynchronize(stream1);
+
+        // 6. Write to hard drive
         writer.write(blurredFrame);
 
         frameCount++;
-        
-        if (frameCount % 10 == 0) {
-            std::cout << "Processed " << frameCount << " / " << totalFrames << " frames...\r" << std::flush;
-        }
+        if (frameCount % 10 == 0) std::cout << "Processed " << frameCount << " frames...\r" << std::flush;
     }
 
-    std::cout << "\nDone! Successfully rendered 'blurred_output.mp4'" << std::endl;
+    std::cout << "\nDone! Cleaning up memory..." << std::endl;
 
-    // Clean up
+    // 3. CLEANUP PHASE
+    cudaStreamDestroy(stream1);
+    cudaFree(d_in);
+    cudaFree(d_out);
+    cudaFreeHost(h_pinned_in);
+    cudaFreeHost(h_pinned_out);
+    
     cap.release();
     writer.release();
-    
     return 0;
 }
